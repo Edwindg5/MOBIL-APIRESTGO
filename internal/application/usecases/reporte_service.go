@@ -14,7 +14,6 @@ type ReporteService struct {
 	loteRepository    interfaces.LoteRepository
 }
 
-// NewReporteService crea una nueva instancia del servicio
 func NewReporteService(
 	reporteRepository interfaces.ReporteRepository,
 	loteRepository interfaces.LoteRepository,
@@ -25,46 +24,36 @@ func NewReporteService(
 	}
 }
 
-// RequestReporte solicita la generación de un reporte
-func (s *ReporteService) RequestReporte(ctx context.Context, loteID, usuarioID int, tipoReporte string) (int, error) {
-	// Verificar que el lote pertenece al usuario
-	lote, err := s.loteRepository.GetByID(ctx, loteID)
+func (s *ReporteService) RequestReporte(ctx context.Context, req *entities.SolicitudReporteRequest, usuarioID int) (*entities.Reporte, error) {
+	lote, err := s.loteRepository.GetByID(ctx, req.IDLote)
 	if err != nil {
-		return 0, fmt.Errorf("error getting lote: %w", err)
+		return nil, fmt.Errorf("error getting lote: %w", err)
 	}
-
 	if lote == nil {
-		return 0, errors.New("lote not found")
+		return nil, errors.New("lote not found")
 	}
-
 	if lote.UsuarioID != usuarioID {
-		return 0, errors.New("unauthorized")
+		return nil, errors.New("unauthorized")
 	}
 
-	// Validar tipo de reporte
-	validTypes := map[string]bool{
-		"diario":   true,
-		"semanal":  true,
-		"mensual":  true,
-	}
-
-	if !validTypes[tipoReporte] {
-		return 0, errors.New("invalid report type")
-	}
-
-	// Crear reporte
 	reporte := &entities.Reporte{
-		LoteID:    loteID,
-		UsuarioID: usuarioID,
-		Tipo:      tipoReporte,
-		Estado:    "pendiente",
+		LoteID:      req.IDLote,
+		UsuarioID:   usuarioID,
+		TipoReporte: req.TipoReporte,
+		Formato:     req.Formato,
+		Estado:      "pendiente",
 	}
 
 	if err := s.reporteRepository.Create(ctx, reporte); err != nil {
-		return 0, fmt.Errorf("error creating reporte: %w", err)
+		return nil, fmt.Errorf("error creating reporte: %w", err)
 	}
+	return reporte, nil
+}
 
-	// TODO: Enviar evento a api-web o cola de mensajes para procesar
-
-	return reporte.ID, nil
+func (s *ReporteService) GetReportes(ctx context.Context, usuarioID int) ([]entities.Reporte, error) {
+	reportes, err := s.reporteRepository.GetByUsuarioID(ctx, usuarioID)
+	if err != nil {
+		return nil, fmt.Errorf("error getting reportes: %w", err)
+	}
+	return reportes, nil
 }

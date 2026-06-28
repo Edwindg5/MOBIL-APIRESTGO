@@ -14,11 +14,8 @@ type HistorialHandler struct {
 	historialService interfaces.HistorialService
 }
 
-// NewHistorialHandler crea una nueva instancia del handler
 func NewHistorialHandler(historialService interfaces.HistorialService) *HistorialHandler {
-	return &HistorialHandler{
-		historialService: historialService,
-	}
+	return &HistorialHandler{historialService: historialService}
 }
 
 // GetHistorial maneja GET /lotes/{id}/historial
@@ -35,18 +32,25 @@ func (h *HistorialHandler) GetHistorial(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	historial, err := h.historialService.GetHistorial(r.Context(), loteID, userID)
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	eventos, total, err := h.historialService.GetHistorial(r.Context(), loteID, userID, page, limit)
 	if err != nil {
-		statusCode := http.StatusInternalServerError
-		if err.Error() == "unauthorized" {
-			statusCode = http.StatusForbidden
-		} else if err.Error() == "lote not found" {
-			statusCode = http.StatusNotFound
+		switch err.Error() {
+		case "lote not found":
+			http.Error(w, `{"error": "lote not found"}`, http.StatusNotFound)
+		case "unauthorized":
+			http.Error(w, `{"error": "unauthorized"}`, http.StatusForbidden)
+		default:
+			http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
 		}
-		http.Error(w, `{"error": "`+err.Error()+`"}`, statusCode)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(historial)
+	json.NewEncoder(w).Encode(map[string]any{
+		"data":  eventos,
+		"total": total,
+	})
 }

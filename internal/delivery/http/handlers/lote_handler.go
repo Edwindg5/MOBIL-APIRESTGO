@@ -9,6 +9,7 @@ import (
 	"github.com/go-playground/validator/v10"
 	"github.com/kajve/api-mobile/internal/application/interfaces"
 	"github.com/kajve/api-mobile/internal/delivery/http/middleware"
+	"github.com/kajve/api-mobile/internal/domain/entities"
 )
 
 type LoteHandler struct {
@@ -32,14 +33,18 @@ func (h *LoteHandler) GetLotes(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lotes, err := h.loteService.GetLotes(r.Context(), userID)
+	estado := r.URL.Query().Get("estado")
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+
+	result, err := h.loteService.GetLotes(r.Context(), userID, estado, page, limit)
 	if err != nil {
 		http.Error(w, `{"error": "error fetching lotes"}`, http.StatusInternalServerError)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(lotes)
+	json.NewEncoder(w).Encode(result)
 }
 
 // GetLote maneja GET /lotes/{id}
@@ -56,20 +61,21 @@ func (h *LoteHandler) GetLote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	lote, err := h.loteService.GetLote(r.Context(), loteID, userID)
+	detalle, err := h.loteService.GetLoteDetalle(r.Context(), loteID, userID)
 	if err != nil {
-		statusCode := http.StatusInternalServerError
-		if err.Error() == "unauthorized" {
-			statusCode = http.StatusForbidden
-		} else if err.Error() == "lote not found" {
-			statusCode = http.StatusNotFound
+		switch err.Error() {
+		case "lote not found":
+			http.Error(w, `{"error": "lote not found"}`, http.StatusNotFound)
+		case "unauthorized":
+			http.Error(w, `{"error": "unauthorized"}`, http.StatusForbidden)
+		default:
+			http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
 		}
-		http.Error(w, `{"error": "`+err.Error()+`"}`, statusCode)
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
-	json.NewEncoder(w).Encode(lote)
+	json.NewEncoder(w).Encode(detalle)
 }
 
 // CreateLote maneja POST /lotes
@@ -80,13 +86,42 @@ func (h *LoteHandler) CreateLote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	type CreateLoteRequest struct {
-		Nombre      string  `json:"nombre" validate:"required"`
-		Descripcion string  `json:"descripcion"`
-		Area        float64 `json:"area" validate:"required,min=0"`
+	var req entities.CreateLoteRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error": "invalid request body"}`, http.StatusBadRequest)
+		return
 	}
 
-	var req CreateLoteRequest
+	if err := h.validator.Struct(req); err != nil {
+		http.Error(w, `{"error": "validation failed: `+err.Error()+`"}`, http.StatusBadRequest)
+		return
+	}
+
+	lote, err := h.loteService.CreateLote(r.Context(), &req, userID)
+	if err != nil {
+		http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(lote)
+}
+
+// UpdateLote maneja PUT /lotes/{id}
+func (h *LoteHandler) UpdateLote(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	loteID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, `{"error": "invalid lote id"}`, http.StatusBadRequest)
+		return
+	}
+
+	var req entities.UpdateLoteRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, `{"error": "invalid request body"}`, http.StatusBadRequest)
 		return
@@ -97,12 +132,105 @@ func (h *LoteHandler) CreateLote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	loteID, err := h.loteService.CreateLote(r.Context(), req.Nombre, req.Descripcion, req.Area, userID)
+	lote, err := h.loteService.UpdateLote(r.Context(), loteID, userID, &req)
 	if err != nil {
-		http.Error(w, `{"error": "`+err.Error()+`"}`, http.StatusBadRequest)
+		switch err.Error() {
+		case "lote not found or not editable":
+			http.Error(w, `{"error": "lote not found or not in process"}`, http.StatusNotFound)
+		default:
+			http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
+		}
 		return
 	}
 
-	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]int{"id": loteID})
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(lote)
+}
+
+// FinalizarLote maneja PUT /lotes/{id}/finalizar
+func (h *LoteHandler) FinalizarLote(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	loteID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, `{"error": "invalid lote id"}`, http.StatusBadRequest)
+		return
+	}
+
+	lote, err := h.loteService.FinalizarLote(r.Context(), loteID, userID)
+	if err != nil {
+		switch err.Error() {
+		case "lote not found or not in process":
+			http.Error(w, `{"error": "lote not found or not in process"}`, http.StatusNotFound)
+		default:
+			http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(lote)
+}
+
+// CancelarLote maneja DELETE /lotes/{id}
+func (h *LoteHandler) CancelarLote(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	loteID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, `{"error": "invalid lote id"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := h.loteService.CancelarLote(r.Context(), loteID, userID); err != nil {
+		switch err.Error() {
+		case "lote not found or not in process":
+			http.Error(w, `{"error": "lote not found or not in process"}`, http.StatusNotFound)
+		default:
+			http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"message": "Lote cancelado"})
+}
+
+// GetQR maneja GET /lotes/{id}/qr
+func (h *LoteHandler) GetQR(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	loteID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, `{"error": "invalid lote id"}`, http.StatusBadRequest)
+		return
+	}
+
+	detalle, err := h.loteService.GetLoteDetalle(r.Context(), loteID, userID)
+	if err != nil {
+		switch err.Error() {
+		case "lote not found":
+			http.Error(w, `{"error": "lote not found"}`, http.StatusNotFound)
+		case "unauthorized":
+			http.Error(w, `{"error": "unauthorized"}`, http.StatusForbidden)
+		default:
+			http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]string{"codigo_qr": detalle.CodigoQR})
 }

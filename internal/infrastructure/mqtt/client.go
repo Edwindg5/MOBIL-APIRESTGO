@@ -1,9 +1,6 @@
 package mqtt
 
-import (
-	"fmt"
-	"time"
-)
+import "fmt"
 
 type MQTTClient struct {
 	brokerURL string

@@ -11,20 +11,17 @@ type RecomendacionRepository struct {
 	db *PostgresDB
 }
 
-// NewRecomendacionRepository crea una nueva instancia del repositorio
 func NewRecomendacionRepository(db *PostgresDB) interfaces.RecomendacionRepository {
 	return &RecomendacionRepository{db: db}
 }
 
-// GetByLoteID obtiene todas las recomendaciones de un lote
 func (r *RecomendacionRepository) GetByLoteID(ctx context.Context, loteID int) ([]entities.Recomendacion, error) {
 	rows, err := r.db.GetPool().Query(ctx, `
-		SELECT id, lote_id, accion, razon, prioridad, created_at
+		SELECT id, lote_id, texto, origen, fecha_generada
 		FROM recomendaciones
 		WHERE lote_id = $1
-		ORDER BY created_at DESC
+		ORDER BY fecha_generada DESC
 	`, loteID)
-
 	if err != nil {
 		return nil, err
 	}
@@ -33,33 +30,19 @@ func (r *RecomendacionRepository) GetByLoteID(ctx context.Context, loteID int) (
 	var recomendaciones []entities.Recomendacion
 	for rows.Next() {
 		var rec entities.Recomendacion
-		err := rows.Scan(
-			&rec.ID,
-			&rec.LoteID,
-			&rec.Accion,
-			&rec.Razon,
-			&rec.Prioridad,
-			&rec.CreatedAt,
-		)
-		if err != nil {
+		if err := rows.Scan(&rec.ID, &rec.LoteID, &rec.Texto, &rec.Origen, &rec.FechaGenerada); err != nil {
 			return nil, err
 		}
 		recomendaciones = append(recomendaciones, rec)
 	}
-
-	return recomendaciones, nil
+	return recomendaciones, rows.Err()
 }
 
-// Create crea una nueva recomendación
-func (r *RecomendacionRepository) Create(ctx context.Context, recomendacion *entities.Recomendacion) error {
-	err := r.db.GetPool().QueryRow(ctx, `
-		INSERT INTO recomendaciones (lote_id, accion, razon, prioridad, created_at)
-		VALUES ($1, $2, $3, $4, NOW())
-		RETURNING id, created_at
-	`, recomendacion.LoteID, recomendacion.Accion, recomendacion.Razon, recomendacion.Prioridad).Scan(
-		&recomendacion.ID,
-		&recomendacion.CreatedAt,
-	)
-
-	return err
+func (r *RecomendacionRepository) Create(ctx context.Context, rec *entities.Recomendacion) error {
+	return r.db.GetPool().QueryRow(ctx, `
+		INSERT INTO recomendaciones (lote_id, texto, origen, fecha_generada)
+		VALUES ($1, $2, $3, NOW())
+		RETURNING id, fecha_generada
+	`, rec.LoteID, rec.Texto, rec.Origen,
+	).Scan(&rec.ID, &rec.FechaGenerada)
 }

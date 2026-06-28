@@ -11,20 +11,19 @@ type PrediccionRepository struct {
 	db *PostgresDB
 }
 
-// NewPrediccionRepository crea una nueva instancia del repositorio
 func NewPrediccionRepository(db *PostgresDB) interfaces.PrediccionRepository {
 	return &PrediccionRepository{db: db}
 }
 
-// GetByLoteID obtiene todas las predicciones de un lote
+const prediccionCols = `id, lote_id, tiempo_estimado_horas, calidad_estimada, confianza, fecha_prediccion, modelo_version`
+
 func (r *PrediccionRepository) GetByLoteID(ctx context.Context, loteID int) ([]entities.Prediccion, error) {
 	rows, err := r.db.GetPool().Query(ctx, `
-		SELECT id, lote_id, prediccion, probabilidad, created_at
+		SELECT `+prediccionCols+`
 		FROM predicciones
 		WHERE lote_id = $1
-		ORDER BY created_at DESC
+		ORDER BY fecha_prediccion DESC
 	`, loteID)
-
 	if err != nil {
 		return nil, err
 	}
@@ -32,33 +31,25 @@ func (r *PrediccionRepository) GetByLoteID(ctx context.Context, loteID int) ([]e
 
 	var predicciones []entities.Prediccion
 	for rows.Next() {
-		var prediccion entities.Prediccion
-		err := rows.Scan(
-			&prediccion.ID,
-			&prediccion.LoteID,
-			&prediccion.Prediccion,
-			&prediccion.Probabilidad,
-			&prediccion.CreatedAt,
-		)
-		if err != nil {
+		var p entities.Prediccion
+		if err := rows.Scan(
+			&p.ID, &p.LoteID, &p.TiempoEstimadoHoras, &p.CalidadEstimada,
+			&p.Confianza, &p.FechaPrediccion, &p.ModeloVersion,
+		); err != nil {
 			return nil, err
 		}
-		predicciones = append(predicciones, prediccion)
+		predicciones = append(predicciones, p)
 	}
-
-	return predicciones, nil
+	return predicciones, rows.Err()
 }
 
-// Create crea una nueva predicción
 func (r *PrediccionRepository) Create(ctx context.Context, prediccion *entities.Prediccion) error {
-	err := r.db.GetPool().QueryRow(ctx, `
-		INSERT INTO predicciones (lote_id, prediccion, probabilidad, created_at)
-		VALUES ($1, $2, $3, NOW())
-		RETURNING id, created_at
-	`, prediccion.LoteID, prediccion.Prediccion, prediccion.Probabilidad).Scan(
-		&prediccion.ID,
-		&prediccion.CreatedAt,
-	)
-
-	return err
+	return r.db.GetPool().QueryRow(ctx, `
+		INSERT INTO predicciones
+			(lote_id, tiempo_estimado_horas, calidad_estimada, confianza, fecha_prediccion, modelo_version)
+		VALUES ($1, $2, $3, $4, NOW(), $5)
+		RETURNING id, fecha_prediccion
+	`, prediccion.LoteID, prediccion.TiempoEstimadoHoras, prediccion.CalidadEstimada,
+		prediccion.Confianza, prediccion.ModeloVersion,
+	).Scan(&prediccion.ID, &prediccion.FechaPrediccion)
 }

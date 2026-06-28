@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 
 	"github.com/kajve/api-mobile/internal/domain/entities"
 )
@@ -41,54 +42,65 @@ type AuthService interface {
 
 // DeviceService define los casos de uso de dispositivos
 type DeviceService interface {
-	// LinkDevice vincula un ESP32 a un usuario usando un provisioning token
-	LinkDevice(ctx context.Context, esp32ID, provisioningToken, loteName string, usuarioID int) (*entities.LinkDeviceResponse, error)
+	LinkDevice(ctx context.Context, esp32ID, provisioningToken string, usuarioID int) (*entities.LinkDeviceResponse, error)
 }
 
-// LoteService define los casos de uso de lotes
+// LoteService define los casos de uso de lotes de café
 type LoteService interface {
-	// GetLotes obtiene todos los lotes del usuario
-	GetLotes(ctx context.Context, usuarioID int) ([]entities.LoteListItem, error)
-	
-	// GetLote obtiene un lote específico
-	GetLote(ctx context.Context, loteID, usuarioID int) (*entities.LoteCafe, error)
-	
-	// CreateLote crea un nuevo lote
-	CreateLote(ctx context.Context, nombre, descripcion string, area float64, usuarioID int) (int, error)
+	// GetLotes lista lotes del usuario con filtro de estado y paginación
+	GetLotes(ctx context.Context, usuarioID int, estado string, page, limit int) (*entities.LotesListResponse, error)
+
+	// GetLoteDetalle retorna un lote con última lectura, alertas activas y última predicción
+	GetLoteDetalle(ctx context.Context, loteID, usuarioID int) (*entities.LoteDetalle, error)
+
+	// CreateLote crea un nuevo lote con codigo_qr automático
+	CreateLote(ctx context.Context, req *entities.CreateLoteRequest, usuarioID int) (*entities.LoteCafe, error)
+
+	// UpdateLote actualiza campos editables de un lote en estado 'en_proceso'
+	UpdateLote(ctx context.Context, loteID, usuarioID int, req *entities.UpdateLoteRequest) (*entities.LoteCafe, error)
+
+	// FinalizarLote cambia estado a 'finalizado' y registra evento en historial
+	FinalizarLote(ctx context.Context, loteID, usuarioID int) (*entities.LoteCafe, error)
+
+	// CancelarLote cambia estado a 'cancelado' (soft delete)
+	CancelarLote(ctx context.Context, loteID, usuarioID int) error
 }
 
 // LecturaService define los casos de uso de lecturas
 type LecturaService interface {
-	// GetLatestLecturas obtiene las últimas lecturas de un lote
 	GetLatestLecturas(ctx context.Context, loteID, usuarioID int, limit int) ([]entities.LecturaAmbiental, error)
+	GetLecturasFiltradas(ctx context.Context, loteID, usuarioID int, limit int, desde time.Time) ([]entities.LecturaAmbiental, error)
+	GetEstadisticas(ctx context.Context, loteID, usuarioID int) (*entities.EstadisticasLote, error)
 }
 
 // AlertaService define los casos de uso de alertas
 type AlertaService interface {
-	// GetAlertas obtiene todas las alertas de un lote
-	GetAlertas(ctx context.Context, loteID, usuarioID int) ([]entities.Alerta, error)
+	GetAlertas(ctx context.Context, loteID, usuarioID int, atendida *bool, nivel string) ([]entities.Alerta, error)
+	AtenderAlerta(ctx context.Context, alertaID, usuarioID int) (*entities.Alerta, error)
 }
 
 // PrediccionService define los casos de uso de predicciones
 type PrediccionService interface {
-	// GetPredicciones obtiene las predicciones de un lote
 	GetPredicciones(ctx context.Context, loteID, usuarioID int) ([]entities.Prediccion, error)
 }
 
 // RecomendacionService define los casos de uso de recomendaciones
 type RecomendacionService interface {
-	// GetRecomendaciones obtiene las recomendaciones de un lote
 	GetRecomendaciones(ctx context.Context, loteID, usuarioID int) ([]entities.Recomendacion, error)
 }
 
 // HistorialService define los casos de uso del historial
 type HistorialService interface {
-	// GetHistorial obtiene el historial de un lote
-	GetHistorial(ctx context.Context, loteID, usuarioID int) ([]entities.HistorialEvento, error)
+	GetHistorial(ctx context.Context, loteID, usuarioID int, page, limit int) ([]entities.HistorialEvento, int, error)
 }
 
 // ReporteService define los casos de uso de reportes
 type ReporteService interface {
-	// RequestReporte solicita la generación de un reporte
-	RequestReporte(ctx context.Context, loteID, usuarioID int, tipoReporte string) (int, error)
+	RequestReporte(ctx context.Context, req *entities.SolicitudReporteRequest, usuarioID int) (*entities.Reporte, error)
+	GetReportes(ctx context.Context, usuarioID int) ([]entities.Reporte, error)
+}
+
+// DashboardService define los casos de uso del dashboard del productor
+type DashboardService interface {
+	GetDashboard(ctx context.Context, usuarioID int) (*entities.DashboardResponse, error)
 }

@@ -13,62 +13,69 @@ type ReporteRepository struct {
 	db *PostgresDB
 }
 
-// NewReporteRepository crea una nueva instancia del repositorio
 func NewReporteRepository(db *PostgresDB) interfaces.ReporteRepository {
 	return &ReporteRepository{db: db}
 }
 
-// GetByID obtiene un reporte por ID
-func (r *ReporteRepository) GetByID(ctx context.Context, id int) (*entities.Reporte, error) {
-	reporte := &entities.Reporte{}
+const reporteCols = `id, lote_id, usuario_id, tipo_reporte, formato, estado, url_archivo, created_at, updated_at`
 
-	err := r.db.GetPool().QueryRow(ctx, `
-		SELECT id, lote_id, usuario_id, tipo, estado, url, created_at, updated_at
-		FROM reportes
-		WHERE id = $1
-	`, id).Scan(
-		&reporte.ID,
-		&reporte.LoteID,
-		&reporte.UsuarioID,
-		&reporte.Tipo,
-		&reporte.Estado,
-		&reporte.URL,
-		&reporte.CreatedAt,
-		&reporte.UpdatedAt,
+func scanReporte(row interface{ Scan(...any) error }, rep *entities.Reporte) error {
+	return row.Scan(
+		&rep.ID, &rep.LoteID, &rep.UsuarioID, &rep.TipoReporte,
+		&rep.Formato, &rep.Estado, &rep.URLArchivo, &rep.CreatedAt, &rep.UpdatedAt,
 	)
+}
 
+func (r *ReporteRepository) GetByID(ctx context.Context, id int) (*entities.Reporte, error) {
+	rep := &entities.Reporte{}
+	err := scanReporte(r.db.GetPool().QueryRow(ctx,
+		`SELECT `+reporteCols+` FROM reportes WHERE id = $1`, id), rep)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
 		}
 		return nil, err
 	}
-
-	return reporte, nil
+	return rep, nil
 }
 
-// Create crea un nuevo reporte
-func (r *ReporteRepository) Create(ctx context.Context, reporte *entities.Reporte) error {
-	err := r.db.GetPool().QueryRow(ctx, `
-		INSERT INTO reportes (lote_id, usuario_id, tipo, estado, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, NOW(), NOW())
+func (r *ReporteRepository) GetByUsuarioID(ctx context.Context, usuarioID int) ([]entities.Reporte, error) {
+	rows, err := r.db.GetPool().Query(ctx, `
+		SELECT `+reporteCols+`
+		FROM reportes
+		WHERE usuario_id = $1
+		ORDER BY created_at DESC
+	`, usuarioID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var reportes []entities.Reporte
+	for rows.Next() {
+		var rep entities.Reporte
+		if err := scanReporte(rows, &rep); err != nil {
+			return nil, err
+		}
+		reportes = append(reportes, rep)
+	}
+	return reportes, rows.Err()
+}
+
+func (r *ReporteRepository) Create(ctx context.Context, rep *entities.Reporte) error {
+	return r.db.GetPool().QueryRow(ctx, `
+		INSERT INTO reportes (lote_id, usuario_id, tipo_reporte, formato, estado, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NOW(), NOW())
 		RETURNING id, created_at, updated_at
-	`, reporte.LoteID, reporte.UsuarioID, reporte.Tipo, reporte.Estado).Scan(
-		&reporte.ID,
-		&reporte.CreatedAt,
-		&reporte.UpdatedAt,
-	)
-
-	return err
+	`, rep.LoteID, rep.UsuarioID, rep.TipoReporte, rep.Formato, rep.Estado,
+	).Scan(&rep.ID, &rep.CreatedAt, &rep.UpdatedAt)
 }
 
-// Update actualiza un reporte
-func (r *ReporteRepository) Update(ctx context.Context, reporte *entities.Reporte) error {
+func (r *ReporteRepository) Update(ctx context.Context, rep *entities.Reporte) error {
 	_, err := r.db.GetPool().Exec(ctx, `
 		UPDATE reportes
-		SET tipo = $1, estado = $2, url = $3, updated_at = NOW()
-		WHERE id = $4
-	`, reporte.Tipo, reporte.Estado, reporte.URL, reporte.ID)
-
+		SET estado = $1, url_archivo = $2, updated_at = NOW()
+		WHERE id = $3
+	`, rep.Estado, rep.URLArchivo, rep.ID)
 	return err
 }

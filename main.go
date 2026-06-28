@@ -15,26 +15,21 @@ import (
 )
 
 func main() {
-	// Cargar configuración
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("Error loading config: %v", err)
 	}
 
-	// Conectar a la base de datos
 	postgres, err := db.NewPostgresDB(cfg.DBConnString())
 	if err != nil {
 		log.Fatalf("Error connecting to database: %v", err)
 	}
 	defer postgres.Close()
 
-	// Inicializar repositorios
+	// Repositorios
 	usuarioRepo := db.NewUsuarioRepository(postgres)
 	sensorRepo := db.NewSensorRepository(postgres)
-	provisioningTokenRepo := db.NewProvisioningTokenRepository(postgres)
 	loteRepo := db.NewLoteRepository(postgres)
-
-	// Inicializar repositorios adicionales
 	lecturaRepo := db.NewLecturaRepository(postgres)
 	alertaRepo := db.NewAlertaRepository(postgres)
 	prediccionRepo := db.NewPrediccionRepository(postgres)
@@ -42,23 +37,25 @@ func main() {
 	historialRepo := db.NewHistorialRepository(postgres)
 	reporteRepo := db.NewReporteRepository(postgres)
 
-	// Inicializar servicios (usecases)
+	// Servicios
 	authService := usecases.NewAuthService(cfg, usuarioRepo)
 	registerService := usecases.NewRegisterService(usuarioRepo)
 	profileService := usecases.NewProfileService(usuarioRepo)
-	deviceService := usecases.NewDeviceService(sensorRepo, loteRepo, provisioningTokenRepo)
-	loteService := usecases.NewLoteService(loteRepo)
+	deviceService := usecases.NewDeviceService(sensorRepo, loteRepo, historialRepo)
+	loteService := usecases.NewLoteService(loteRepo, historialRepo, lecturaRepo, alertaRepo, prediccionRepo)
 	lecturaService := usecases.NewLecturaService(lecturaRepo, loteRepo)
-	alertaService := usecases.NewAlertaService(alertaRepo, loteRepo)
+	alertaService := usecases.NewAlertaService(alertaRepo, loteRepo, historialRepo)
 	prediccionService := usecases.NewPrediccionService(prediccionRepo, loteRepo)
 	recomendacionService := usecases.NewRecomendacionService(recomendacionRepo, loteRepo)
 	historialService := usecases.NewHistorialService(historialRepo, loteRepo)
 	reporteService := usecases.NewReporteService(reporteRepo, loteRepo)
+	dashboardService := usecases.NewDashboardService(loteRepo, alertaRepo, lecturaRepo, prediccionRepo)
 
-	// Inicializar handlers
+	// Handlers
 	authHandler := handlers.NewAuthHandler(authService, registerService)
 	profileHandler := handlers.NewProfileHandler(profileService)
 	deviceHandler := handlers.NewDeviceHandler(deviceService)
+	dashboardHandler := handlers.NewDashboardHandler(dashboardService)
 	loteHandler := handlers.NewLoteHandler(loteService)
 	lecturaHandler := handlers.NewLecturaHandler(lecturaService)
 	alertaHandler := handlers.NewAlertaHandler(alertaService)
@@ -67,78 +64,72 @@ func main() {
 	historialHandler := handlers.NewHistorialHandler(historialService)
 	reporteHandler := handlers.NewReporteHandler(reporteService)
 
-	// Crear router chi
 	router := chi.NewRouter()
 
-	// Middleware global
 	router.Use(middleware.Logger)
 	router.Use(middleware.Recoverer)
 	router.Use(httpmiddleware.JSONContentType)
 	router.Use(httpmiddleware.CORSMiddleware(cfg.CORSAllowedOrigin))
 
-	// Rate limiting
 	rateLimiter := httpmiddleware.NewRateLimiter(cfg.RateLimitReqPerMin)
 	router.Use(rateLimiter.Middleware())
 
-	// Rutas públicas (sin autenticación)
+	// Rutas públicas
 	router.Route("/auth", func(r chi.Router) {
 		r.Post("/login", authHandler.Login)
 		r.Post("/refresh", authHandler.Refresh)
 		r.Post("/register", authHandler.Register)
 	})
 
-	// Rutas protegidas (con autenticación JWT)
+	// Rutas protegidas
 	router.Route("/", func(r chi.Router) {
 		r.Use(httpmiddleware.JWTAuth(authService))
 
-		// Perfil del usuario autenticado
+		// Perfil
 		r.Route("/perfil", func(r chi.Router) {
 			r.Get("/", profileHandler.GetPerfil)
 			r.Put("/", profileHandler.UpdatePerfil)
 			r.Put("/password", profileHandler.ChangePassword)
 		})
 
+		// Dashboard
+		r.Get("/dashboard", dashboardHandler.GetDashboard)
+
 		// Devices
-		r.Route("/devices", func(r chi.Router) {
-			r.Post("/link", deviceHandler.LinkDevice)
-		})
+		r.Post("/devices/link", deviceHandler.LinkDevice)
+
+		// Alertas (acción individual)
+		r.Put("/alertas/{id}/atender", alertaHandler.AtenderAlerta)
 
 		// Lotes
 		r.Route("/lotes", func(r chi.Router) {
 			r.Get("/", loteHandler.GetLotes)
 			r.Post("/", loteHandler.CreateLote)
 			r.Get("/{id}", loteHandler.GetLote)
-
-			// Lecturas ambientales
+			r.Put("/{id}", loteHandler.UpdateLote)
+			r.Delete("/{id}", loteHandler.CancelarLote)
+			r.Put("/{id}/finalizar", loteHandler.FinalizarLote)
+			r.Get("/{id}/qr", loteHandler.GetQR)
 			r.Get("/{id}/lecturas", lecturaHandler.GetLecturas)
-
-			// Alertas
+			r.Get("/{id}/estadisticas", lecturaHandler.GetEstadisticas)
 			r.Get("/{id}/alertas", alertaHandler.GetAlertas)
-
-			// Predicciones
 			r.Get("/{id}/predicciones", prediccionHandler.GetPredicciones)
-
-			// Recomendaciones
 			r.Get("/{id}/recomendaciones", recomendacionHandler.GetRecomendaciones)
-
-			// Historial
 			r.Get("/{id}/historial", historialHandler.GetHistorial)
 		})
 
 		// Reportes
 		r.Route("/reportes", func(r chi.Router) {
 			r.Post("/", reporteHandler.RequestReporte)
-			r.Get("/{id}", reporteHandler.GetReporte)
+			r.Get("/", reporteHandler.GetReportes)
 		})
 	})
 
-	// Health check
 	router.Get("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte(`{"status": "ok"}`))
 	})
 
-	// Iniciar servidor
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	log.Printf("Server listening on %s", addr)
 	if err := http.ListenAndServe(addr, router); err != nil {

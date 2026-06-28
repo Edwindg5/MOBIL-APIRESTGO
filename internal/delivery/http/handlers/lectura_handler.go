@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/kajve/api-mobile/internal/application/interfaces"
@@ -14,11 +15,8 @@ type LecturaHandler struct {
 	lecturaService interfaces.LecturaService
 }
 
-// NewLecturaHandler crea una nueva instancia del handler
 func NewLecturaHandler(lecturaService interfaces.LecturaService) *LecturaHandler {
-	return &LecturaHandler{
-		lecturaService: lecturaService,
-	}
+	return &LecturaHandler{lecturaService: lecturaService}
 }
 
 // GetLecturas maneja GET /lotes/{id}/lecturas
@@ -35,26 +33,64 @@ func (h *LecturaHandler) GetLecturas(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Obtener límite de query params (por defecto 50)
 	limit := 50
-	if limitStr := r.URL.Query().Get("limit"); limitStr != "" {
-		if l, err := strconv.Atoi(limitStr); err == nil && l > 0 {
-			limit = l
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
 		}
 	}
 
-	lecturas, err := h.lecturaService.GetLatestLecturas(r.Context(), loteID, userID, limit)
-	if err != nil {
-		statusCode := http.StatusInternalServerError
-		if err.Error() == "unauthorized" {
-			statusCode = http.StatusForbidden
-		} else if err.Error() == "lote not found" {
-			statusCode = http.StatusNotFound
+	var desde time.Time
+	if d := r.URL.Query().Get("desde"); d != "" {
+		if t, err := time.Parse(time.RFC3339, d); err == nil {
+			desde = t
 		}
-		http.Error(w, `{"error": "`+err.Error()+`"}`, statusCode)
+	}
+
+	lecturas, err := h.lecturaService.GetLecturasFiltradas(r.Context(), loteID, userID, limit, desde)
+	if err != nil {
+		switch err.Error() {
+		case "lote not found":
+			http.Error(w, `{"error": "lote not found"}`, http.StatusNotFound)
+		case "unauthorized":
+			http.Error(w, `{"error": "unauthorized"}`, http.StatusForbidden)
+		default:
+			http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
+		}
 		return
 	}
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(lecturas)
+}
+
+// GetEstadisticas maneja GET /lotes/{id}/estadisticas
+func (h *LecturaHandler) GetEstadisticas(w http.ResponseWriter, r *http.Request) {
+	userID, ok := middleware.GetUserIDFromContext(r.Context())
+	if !ok {
+		http.Error(w, `{"error": "unauthorized"}`, http.StatusUnauthorized)
+		return
+	}
+
+	loteID, err := strconv.Atoi(chi.URLParam(r, "id"))
+	if err != nil {
+		http.Error(w, `{"error": "invalid lote id"}`, http.StatusBadRequest)
+		return
+	}
+
+	stats, err := h.lecturaService.GetEstadisticas(r.Context(), loteID, userID)
+	if err != nil {
+		switch err.Error() {
+		case "lote not found":
+			http.Error(w, `{"error": "lote not found"}`, http.StatusNotFound)
+		case "unauthorized":
+			http.Error(w, `{"error": "unauthorized"}`, http.StatusForbidden)
+		default:
+			http.Error(w, `{"error": "internal server error"}`, http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(stats)
 }

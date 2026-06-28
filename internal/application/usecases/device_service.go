@@ -6,139 +6,81 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/kajve/api-mobile/internal/application/interfaces"
 	"github.com/kajve/api-mobile/internal/domain/entities"
 )
 
 type DeviceService struct {
-	sensorRepository             interfaces.SensorRepository
-	loteRepository               interfaces.LoteRepository
-	provisioningTokenRepository  interfaces.ProvisioningTokenRepository
+	sensorRepository interfaces.SensorRepository
+	loteRepository   interfaces.LoteRepository
+	historialRepo    interfaces.HistorialRepository
 }
 
-// NewDeviceService crea una nueva instancia del servicio
 func NewDeviceService(
 	sensorRepository interfaces.SensorRepository,
 	loteRepository interfaces.LoteRepository,
-	provisioningTokenRepository interfaces.ProvisioningTokenRepository,
+	historialRepo interfaces.HistorialRepository,
 ) interfaces.DeviceService {
 	return &DeviceService{
-		sensorRepository:            sensorRepository,
-		loteRepository:              loteRepository,
-		provisioningTokenRepository: provisioningTokenRepository,
+		sensorRepository: sensorRepository,
+		loteRepository:   loteRepository,
+		historialRepo:    historialRepo,
 	}
 }
 
-// LinkDevice vincula un ESP32 a un usuario usando un provisioning token
-func (s *DeviceService) LinkDevice(
-	ctx context.Context,
-	esp32ID, provisioningToken, loteName string,
-	usuarioID int,
-) (*entities.LinkDeviceResponse, error) {
-	
-	// Verificar que el ESP32 no esté ya vinculado
-	existingSensor, err := s.sensorRepository.GetByESP32ID(ctx, esp32ID)
+func (s *DeviceService) LinkDevice(ctx context.Context, esp32ID, provisioningToken string, usuarioID int) (*entities.LinkDeviceResponse, error) {
+	sensor, err := s.sensorRepository.GetByIdentifier(ctx, esp32ID)
 	if err != nil {
-		return nil, fmt.Errorf("error checking sensor: %w", err)
+		return nil, fmt.Errorf("error finding sensor: %w", err)
+	}
+	if sensor == nil {
+		return nil, errors.New("sensor not found")
 	}
 
-	if existingSensor != nil && existingSensor.LinkedAt != nil {
-		return nil, errors.New("device already linked")
+	if sensor.TokenUsado {
+		return nil, errors.New("token already used")
 	}
 
-	// Validar provisioning token
-	tokenHash := HashTokenForStorage(provisioningToken)
-	provToken, err := s.provisioningTokenRepository.GetByToken(ctx, tokenHash)
-	if err != nil {
-		return nil, fmt.Errorf("error validating token: %w", err)
+	if sensor.ProvisioningToken == nil || *sensor.ProvisioningToken != provisioningToken {
+		return nil, errors.New("invalid provisioning token")
 	}
 
-	if provToken == nil {
-		return nil, errors.New("invalid or expired provisioning token")
+	if err := s.sensorRepository.MarcarTokenUsado(ctx, sensor.ID); err != nil {
+		return nil, fmt.Errorf("error marking token: %w", err)
 	}
 
-	if provToken.UsuarioID != usuarioID {
-		return nil, errors.New("provisioning token does not belong to user")
+	lote := &entities.LoteCafe{
+		UsuarioID:   usuarioID,
+		NombreLote:  fmt.Sprintf("Lote %s", esp32ID),
+		Variedad:    "arabica",
+		TipoProceso: "lavado",
+		PesoKg:      0,
+		Ubicacion:   "",
+		IDSensor:    &sensor.ID,
+		Estado:      "en_proceso",
 	}
 
-	if provToken.ESP32ID != esp32ID {
-		return nil, errors.New("provisioning token ESP32 ID mismatch")
-	}
-
-	// Crear o actualizar lote
-	loteID, err := s.createOrGetLote(ctx, usuarioID, loteName)
+	created, err := s.loteRepository.Create(ctx, lote)
 	if err != nil {
 		return nil, fmt.Errorf("error creating lote: %w", err)
 	}
 
-	// Crear o vincular sensor
-	var sensorID int
-	if existingSensor != nil {
-		// Actualizar sensor existente
-		sensorID = existingSensor.ID
-		if err := s.sensorRepository.LinkToLote(ctx, sensorID, loteID); err != nil {
-			return nil, fmt.Errorf("error linking sensor: %w", err)
-		}
-	} else {
-		// Crear nuevo sensor
-		newSensor := &entities.Sensor{
-			ESP32ID: esp32ID,
-			LoteID:  &loteID,
-			Estado:  "activo",
-		}
-		sensorID, err = s.sensorRepository.Create(ctx, newSensor)
-		if err != nil {
-			return nil, fmt.Errorf("error creating sensor: %w", err)
-		}
-
-		// Vincular sensor al lote
-		if err := s.sensorRepository.LinkToLote(ctx, sensorID, loteID); err != nil {
-			return nil, fmt.Errorf("error linking sensor: %w", err)
-		}
+	if err := s.sensorRepository.LinkToLote(ctx, sensor.ID, created.ID); err != nil {
+		return nil, fmt.Errorf("error linking sensor: %w", err)
 	}
 
-	// Marcar token como usado
-	if err := s.provisioningTokenRepository.MarkAsUsed(ctx, provToken.ID); err != nil {
-		return nil, fmt.Errorf("error marking token as used: %w", err)
+	evento := &entities.HistorialEvento{
+		LoteID:      created.ID,
+		Tipo:        "dispositivo_enlazado",
+		Descripcion: fmt.Sprintf("Sensor %s enlazado al lote", esp32ID),
 	}
-
-	now := time.Now()
+	_ = s.historialRepo.Create(ctx, evento)
 
 	return &entities.LinkDeviceResponse{
-		SensorID: sensorID,
-		LoteID:   loteID,
-		Message:  "Device linked successfully",
-		LinkedAt: now,
+		Lote:    created,
+		Message: "Dispositivo enlazado exitosamente",
 	}, nil
-}
-
-// createOrGetLote crea o obtiene un lote existente
-func (s *DeviceService) createOrGetLote(ctx context.Context, usuarioID int, loteName string) (int, error) {
-	// Si ya existe un lote con ese nombre para el usuario, retornarlo
-	lotes, err := s.loteRepository.GetByUsuarioID(ctx, usuarioID)
-	if err != nil {
-		return 0, err
-	}
-
-	for _, lote := range lotes {
-		if lote.Nombre == loteName {
-			return lote.ID, nil
-		}
-	}
-
-	// Crear nuevo lote
-	newLote := &entities.LoteCafe{
-		UsuarioID:   usuarioID,
-		Nombre:      loteName,
-		Descripcion: fmt.Sprintf("Lote %s vinculado automáticamente", loteName),
-		Area:        0, // Se puede actualizar después
-		Estado:      "activo",
-	}
-
-	loteID, err := s.loteRepository.Create(ctx, newLote)
-	return loteID, err
 }
 
 // GenerateProvisioningToken genera un token de provisioning único

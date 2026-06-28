@@ -14,7 +14,6 @@ type HistorialService struct {
 	loteRepository      interfaces.LoteRepository
 }
 
-// NewHistorialService crea una nueva instancia del servicio
 func NewHistorialService(
 	historialRepository interfaces.HistorialRepository,
 	loteRepository interfaces.LoteRepository,
@@ -25,26 +24,29 @@ func NewHistorialService(
 	}
 }
 
-// GetHistorial obtiene el historial de un lote
-func (s *HistorialService) GetHistorial(ctx context.Context, loteID, usuarioID int) ([]entities.HistorialEvento, error) {
-	// Verificar que el lote pertenece al usuario
+func (s *HistorialService) GetHistorial(ctx context.Context, loteID, usuarioID int, page, limit int) ([]entities.HistorialEvento, int, error) {
 	lote, err := s.loteRepository.GetByID(ctx, loteID)
 	if err != nil {
-		return nil, fmt.Errorf("error getting lote: %w", err)
+		return nil, 0, fmt.Errorf("error getting lote: %w", err)
 	}
-
 	if lote == nil {
-		return nil, errors.New("lote not found")
+		return nil, 0, errors.New("lote not found")
 	}
-
 	if lote.UsuarioID != usuarioID {
-		return nil, errors.New("unauthorized")
+		return nil, 0, errors.New("unauthorized")
 	}
 
-	historial, err := s.historialRepository.GetByLoteID(ctx, loteID)
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 {
+		limit = 20
+	}
+	offset := (page - 1) * limit
+
+	eventos, total, err := s.historialRepository.GetByLoteIDPaginated(ctx, loteID, limit, offset)
 	if err != nil {
-		return nil, fmt.Errorf("error getting historial: %w", err)
+		return nil, 0, fmt.Errorf("error getting historial: %w", err)
 	}
-
-	return historial, nil
+	return eventos, total, nil
 }
