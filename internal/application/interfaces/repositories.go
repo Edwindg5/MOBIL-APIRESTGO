@@ -8,14 +8,23 @@ import (
 
 // UsuarioRepository define las operaciones para usuarios
 type UsuarioRepository interface {
-	// GetByEmail obtiene un usuario por email
+	// GetByEmail obtiene un usuario activo por email
 	GetByEmail(ctx context.Context, email string) (*entities.Usuario, error)
-	
+
 	// GetByID obtiene un usuario por ID
 	GetByID(ctx context.Context, id int) (*entities.Usuario, error)
-	
+
+	// ExistsByEmail comprueba si ya existe un usuario con ese email (cualquier estado)
+	ExistsByEmail(ctx context.Context, email string) (bool, error)
+
 	// Create crea un nuevo usuario
 	Create(ctx context.Context, usuario *entities.Usuario) error
+
+	// Update actualiza nombre y telefono de un usuario; retorna el usuario actualizado
+	Update(ctx context.Context, id int, nombre, telefono string) (*entities.Usuario, error)
+
+	// UpdatePassword actualiza la contraseña hasheada de un usuario
+	UpdatePassword(ctx context.Context, id int, hashedPassword string) error
 }
 
 // LoteRepository define las operaciones para lotes de café

@@ -8,14 +8,55 @@ import (
 
 // Usuario representa un usuario del sistema
 type Usuario struct {
-	ID        int       `db:"id"`
-	Email     string    `db:"email"`
-	Password  string    `db:"password"`
-	NombreCompleto string `db:"nombre_completo"`
-	Rol       string    `db:"rol"` // 'productor', 'admin', etc.
-	Estado    string    `db:"estado"` // 'activo', 'inactivo'
-	CreatedAt time.Time `db:"created_at"`
-	UpdatedAt time.Time `db:"updated_at"`
+	ID             int       `db:"id"`
+	Email          string    `db:"email"`
+	Password       string    `db:"password"`
+	NombreCompleto string    `db:"nombre_completo"`
+	Telefono       *string   `db:"telefono"`
+	Rol            string    `db:"rol"`
+	Estado         string    `db:"estado"`
+	CreatedAt      time.Time `db:"created_at"`
+	UpdatedAt      time.Time `db:"updated_at"`
+}
+
+// RegisterRequest es la solicitud de registro de nuevo usuario
+type RegisterRequest struct {
+	Nombre   string `json:"nombre" validate:"required,min=2"`
+	Email    string `json:"email" validate:"required,email"`
+	Password string `json:"password" validate:"required,min=6"`
+	Telefono string `json:"telefono" validate:"required"`
+}
+
+// RegisterResponse es la respuesta tras registrar un usuario
+type RegisterResponse struct {
+	IDUsuario     int       `json:"id_usuario"`
+	Nombre        string    `json:"nombre"`
+	Email         string    `json:"email"`
+	Rol           string    `json:"rol"`
+	FechaRegistro time.Time `json:"fecha_registro"`
+}
+
+// PerfilResponse es la respuesta con el perfil del usuario autenticado
+type PerfilResponse struct {
+	IDUsuario     int       `json:"id_usuario"`
+	Nombre        string    `json:"nombre"`
+	Email         string    `json:"email"`
+	Rol           string    `json:"rol"`
+	Telefono      *string   `json:"telefono"`
+	Estado        string    `json:"estado"`
+	FechaRegistro time.Time `json:"fecha_registro"`
+}
+
+// UpdatePerfilRequest es la solicitud de actualización de perfil
+type UpdatePerfilRequest struct {
+	Nombre   string `json:"nombre" validate:"required,min=2"`
+	Telefono string `json:"telefono" validate:"required"`
+}
+
+// ChangePasswordRequest es la solicitud de cambio de contraseña
+type ChangePasswordRequest struct {
+	PasswordActual string `json:"password_actual" validate:"required"`
+	PasswordNueva  string `json:"password_nueva" validate:"required,min=6"`
 }
 
 // LoginRequest es la solicitud de login

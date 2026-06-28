@@ -44,6 +44,8 @@ func main() {
 
 	// Inicializar servicios (usecases)
 	authService := usecases.NewAuthService(cfg, usuarioRepo)
+	registerService := usecases.NewRegisterService(usuarioRepo)
+	profileService := usecases.NewProfileService(usuarioRepo)
 	deviceService := usecases.NewDeviceService(sensorRepo, loteRepo, provisioningTokenRepo)
 	loteService := usecases.NewLoteService(loteRepo)
 	lecturaService := usecases.NewLecturaService(lecturaRepo, loteRepo)
@@ -54,7 +56,8 @@ func main() {
 	reporteService := usecases.NewReporteService(reporteRepo, loteRepo)
 
 	// Inicializar handlers
-	authHandler := handlers.NewAuthHandler(authService)
+	authHandler := handlers.NewAuthHandler(authService, registerService)
+	profileHandler := handlers.NewProfileHandler(profileService)
 	deviceHandler := handlers.NewDeviceHandler(deviceService)
 	loteHandler := handlers.NewLoteHandler(loteService)
 	lecturaHandler := handlers.NewLecturaHandler(lecturaService)
@@ -81,11 +84,19 @@ func main() {
 	router.Route("/auth", func(r chi.Router) {
 		r.Post("/login", authHandler.Login)
 		r.Post("/refresh", authHandler.Refresh)
+		r.Post("/register", authHandler.Register)
 	})
 
 	// Rutas protegidas (con autenticación JWT)
 	router.Route("/", func(r chi.Router) {
 		r.Use(httpmiddleware.JWTAuth(authService))
+
+		// Perfil del usuario autenticado
+		r.Route("/perfil", func(r chi.Router) {
+			r.Get("/", profileHandler.GetPerfil)
+			r.Put("/", profileHandler.UpdatePerfil)
+			r.Put("/password", profileHandler.ChangePassword)
+		})
 
 		// Devices
 		r.Route("/devices", func(r chi.Router) {
@@ -97,19 +108,19 @@ func main() {
 			r.Get("/", loteHandler.GetLotes)
 			r.Post("/", loteHandler.CreateLote)
 			r.Get("/{id}", loteHandler.GetLote)
-			
+
 			// Lecturas ambientales
 			r.Get("/{id}/lecturas", lecturaHandler.GetLecturas)
-			
+
 			// Alertas
 			r.Get("/{id}/alertas", alertaHandler.GetAlertas)
-			
+
 			// Predicciones
 			r.Get("/{id}/predicciones", prediccionHandler.GetPredicciones)
-			
+
 			// Recomendaciones
 			r.Get("/{id}/recomendaciones", recomendacionHandler.GetRecomendaciones)
-			
+
 			// Historial
 			r.Get("/{id}/historial", historialHandler.GetHistorial)
 		})

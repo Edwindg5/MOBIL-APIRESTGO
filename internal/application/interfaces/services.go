@@ -6,6 +6,24 @@ import (
 	"github.com/kajve/api-mobile/internal/domain/entities"
 )
 
+// RegisterService define el caso de uso de registro de usuarios
+type RegisterService interface {
+	// Register crea un nuevo usuario con rol productor
+	Register(ctx context.Context, nombre, email, password, telefono string) (*entities.RegisterResponse, error)
+}
+
+// ProfileService define los casos de uso de perfil del usuario autenticado
+type ProfileService interface {
+	// GetProfile retorna el perfil del usuario autenticado
+	GetProfile(ctx context.Context, userID int) (*entities.PerfilResponse, error)
+
+	// UpdateProfile actualiza nombre y telefono del usuario
+	UpdateProfile(ctx context.Context, userID int, nombre, telefono string) (*entities.PerfilResponse, error)
+
+	// ChangePassword valida la contraseña actual y establece la nueva
+	ChangePassword(ctx context.Context, userID int, passwordActual, passwordNueva string) error
+}
+
 // AuthService define los casos de uso de autenticación
 type AuthService interface {
 	// Login autentica un usuario y retorna tokens JWT
